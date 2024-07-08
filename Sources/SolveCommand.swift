@@ -37,7 +37,17 @@ extension Letterboxed {
                     print(word)
                 }
             }
+            
+            if let answer = _shortestSolution(puzzle, validWords) {
+                let path = _constructPath(answer, validWords, wordlist)
+                print("Found a solution with \(path.count) steps:")
+                print(path.joined(separator: " -> "))
+            } else {
+                print("No solution found")
+            }
         }
+        
+        // MARK: - Initial Parsing
         
         private func _readWordlist() throws -> [String] {
             let file = File(fileURL: URL(fileURLWithPath: wordlistFile))
@@ -59,6 +69,8 @@ extension Letterboxed {
             }
             return validList
         }
+        
+        // MARK: - Best words
         
         private func _getBestWords(_ validWords: [ValidWordRef], _ wordlist: [String]) -> [String] {
             var maxCount = 0
@@ -87,5 +99,77 @@ extension Letterboxed {
             }
             return count
         }
+        
+        // MARK: - Graph Traversal
+        
+        private func _shortestSolution(_ puzzle: Puzzle, _ words: [ValidWordRef]) -> GraphAnswer? {
+            var wordIdxByStartLetter: [Character:[Int]] = [:]
+            for (idx, wordRef) in words.enumerated() {
+                wordIdxByStartLetter[wordRef.word.startChar, default: []].append(idx)
+            }
+            
+            var knownFrom: [GraphState:GraphTraversal] = [:]
+            var currentStates = puzzle.sideByLetter.keys.map { GraphState(mask: 0, letter: $0) }
+            
+            while currentStates.count > 0 {
+                var nextStates: [GraphState] = []
+                for state in currentStates {
+                    for wordIdx in wordIdxByStartLetter[state.letter, default: []] {
+                        let wordRef = words[wordIdx]
+                        let newMask = state.mask | wordRef.word.mask
+                        let newState = GraphState(mask: newMask, letter: wordRef.word.endChar)
+                        guard knownFrom[newState] == nil else { continue }
+                        // new state reached
+                        nextStates.append(newState)
+                        let traversal = GraphTraversal(wordIdx: wordIdx, prevState: state)
+                        knownFrom[newState] = traversal
+                        if newState.mask == puzzle.mask {
+                            // found solution
+                            let answer = GraphAnswer(finalState: newState, traversals: knownFrom)
+                            return answer
+                        }
+                    }
+                }
+                currentStates = nextStates
+            }
+            
+            return nil
+        }
+        
+        private func _constructPath(_ answer: GraphAnswer, _ wordRefs: [ValidWordRef], _ wordlist: [String]) -> [String] {
+            var reversedPath: [String] = []
+            var state = answer.finalState
+            while true {
+                if state.mask == 0 {
+                    // initial state. Done
+                    break
+                }
+                
+                let traversal = answer.traversals[state]!
+                let wordRef = wordRefs[traversal.wordIdx]
+                let word = wordlist[wordRef.listIndex]
+                reversedPath.append(word)
+                state = traversal.prevState
+            }
+            
+            return reversedPath.reversed()
+        }
     }
+}
+
+// MARK: - Helper Objects
+
+private struct GraphState: Hashable {
+    let mask: Int
+    let letter: Character
+}
+
+private struct GraphTraversal {
+    let wordIdx: Int
+    let prevState: GraphState
+}
+
+private struct GraphAnswer {
+    let finalState: GraphState
+    let traversals: [GraphState:GraphTraversal]
 }
